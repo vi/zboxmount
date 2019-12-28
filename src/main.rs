@@ -1,10 +1,11 @@
-#![allow(unused)]
 use structopt::StructOpt;
 
 use std::path::PathBuf;
-use zbox::{Repo, RepoOpener, Cipher, OpsLimit, MemLimit};
+use zbox::{RepoOpener, Cipher, OpsLimit, MemLimit};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
+
+mod zboxfuse;
 
 fn parse_cipher(x : &str) -> Result<Cipher> {
     match x {
@@ -84,6 +85,17 @@ struct Opt {
     /// Specify a file to read for password. Single trailing newline is chopped off.
     #[structopt(long="password-file", short="-p")]
     password_file: Option<PathBuf>,
+
+    /// Location to mount FUSE filesystem at
+    mountpoint: PathBuf,
+
+    /// Rest of FUSE options, like `-o allow_others,ro`
+    #[structopt(parse(from_os_str))]
+    fuseopts: Vec<std::ffi::OsString>,
+
+    /// Number of theads for Fuse-MT.
+    #[structopt(long="threads", short="t", default_value="0")]
+    threads: usize,
 }
 
 fn main() -> Result<()> {
@@ -94,7 +106,7 @@ fn main() -> Result<()> {
     }
 
     zbox::init_env();
-    
+
     let mut ro = RepoOpener::new();
     
     if let Some(ci) = opt.cipher {
@@ -123,9 +135,10 @@ fn main() -> Result<()> {
         rpassword::prompt_password_stderr("Zbox repository password: ")?
     };
 
-    let mut repo = ro.open(&opt.uri, &passwd)?;
+    let repo = ro.open(&opt.uri, &passwd)?;
 
     zeroize::Zeroize::zeroize(&mut passwd);
 
-    Ok(())
+    let fuseopts_ref : Vec<&std::ffi::OsStr> = opt.fuseopts.iter().map(|x|x.as_ref()).collect();
+    zboxfuse::mount(repo, opt.mountpoint, fuseopts_ref, opt.threads)
 }
