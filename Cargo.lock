@@ -2160,9 +2160,13 @@ dependencies = [
 name = "zboxmount"
 version = "0.1.0"
 dependencies = [
+ "env_logger",
  "fuse_mt",
+ "libc",
+ "log 0.4.8",
  "rpassword",
  "structopt",
+ "time",
  "zbox",
  "zeroize",
 ]

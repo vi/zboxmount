@@ -99,6 +99,7 @@ struct Opt {
 }
 
 fn main() -> Result<()> {
+    env_logger::init();
     let opt = Opt::from_args();
 
     if opt.password.is_some() && opt.password_file.is_some() {
