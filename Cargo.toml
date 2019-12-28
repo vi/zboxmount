@@ -7,8 +7,21 @@ edition = "2018"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [dependencies]
-zbox = "0.8.8"
+zbox = {version="0.8.8", default-features=false}
 structopt = "0.3.5"
 fuse_mt = "0.5.0"
 rpassword = "4.0.3"
 zeroize = "1.1.0"
+
+[features]
+default = ["storage-file", "storage-mem"]
+storage-mem = ["zbox/storage-mem"]
+storage-file = ["zbox/storage-file"]
+#storage-faulty = ["zbox/storage-faulty "]
+storage-sqlite = ["zbox/storage-sqlite"]
+storage-redis = ["zbox/storage-redis"]
+storage-zbox = ["zbox/storage-zbox"]
+#storage-zbox-faulty = ["zbox/storage-zbox-faulty"]
+storage-zbox-native = ["zbox/storage-zbox-native"]
+storage-zbox-android = ["zbox/storage-zbox-android"]
+libsodium-bundled = ["zbox/libsodium-bundled"]
