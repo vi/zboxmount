@@ -16,6 +16,7 @@ env_logger = "0.7.1"
 time = "0.1.42"
 libc = "0.2.66"
 log = "0.4.8"
+sharded-slab = "0.0.7"
 
 [features]
 default = ["storage-file", "storage-mem"]

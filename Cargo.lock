@@ -1413,6 +1413,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "2579985fda508104f7587689507983eadd6a6e84dd35d6d115361f530916fa0d"
 
 [[package]]
+name = "sharded-slab"
+version = "0.0.7"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "73ee8b66dea1777ef2c5f33ffeb90fd54afe43bb5c97bdaf82b521ad7c90a395"
+dependencies = [
+ "lazy_static",
+]
+
+[[package]]
 name = "slab"
 version = "0.4.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2165,6 +2174,7 @@ dependencies = [
  "libc",
  "log 0.4.8",
  "rpassword",
+ "sharded-slab",
  "structopt",
  "time",
  "zbox",
