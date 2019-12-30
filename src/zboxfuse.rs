@@ -13,6 +13,53 @@ use zbox::{File, OpenOptions, Repo};
 
 type Result<T> = std::result::Result<T, Box<dyn std::error::Error>>;
 
+fn oio2errno(e: std::io::Error) -> c_int {
+    use libc::{EACCES, EBADF, EEXIST, EISDIR, ENOENT, ENOMSG, ENOTDIR, ENOTEMPTY, ENOTTY};
+    use std::string::ToString;
+    match e.to_string() {
+        x if x == zbox::Error::AlreadyExists.to_string() => EEXIST,
+
+        x if x == zbox::Error::Encrypt.to_string() => ENOTTY,
+        x if x == zbox::Error::Decrypt.to_string() => ENOTTY,
+        x if x == zbox::Error::Corrupted.to_string() => ENOTTY,
+        x if x == zbox::Error::WrongVersion.to_string() => ENOTTY,
+        x if x == zbox::Error::NoEntity.to_string() => ENOTTY,
+        x if x == zbox::Error::NotInSync.to_string() => ENOTTY,
+        x if x == zbox::Error::InTrans.to_string() => ENOTTY,
+        x if x == zbox::Error::NotInTrans.to_string() => ENOTTY,
+        x if x == zbox::Error::NoTrans.to_string() => ENOTTY,
+        x if x == zbox::Error::Uncompleted.to_string() => ENOTTY,
+        x if x == zbox::Error::InUse.to_string() => ENOTTY,
+        x if x == zbox::Error::InvalidArgument.to_string() => ENOTTY,
+        x if x == zbox::Error::NoVersion.to_string() => ENOENT,
+        x if x == zbox::Error::NotWrite.to_string() => ENOTTY,
+        x if x == zbox::Error::NotFinish.to_string() => ENOTTY,
+        x if x == zbox::Error::Closed.to_string() => EBADF,
+
+
+        x if x == zbox::Error::NoContent.to_string() => ENOENT,
+        x if x == zbox::Error::InvalidPath.to_string() => ENOENT,
+        x if x == zbox::Error::NotFound.to_string() => ENOENT,
+       
+        x if x == zbox::Error::AlreadyExists.to_string() => EEXIST,
+
+        x if x == zbox::Error::IsRoot.to_string() => EISDIR,
+        x if x == zbox::Error::IsDir.to_string() => EISDIR,
+        x if x == zbox::Error::NotFile.to_string() => EISDIR,
+
+        x if x == zbox::Error::IsFile.to_string() => ENOTDIR,
+        x if x == zbox::Error::NotDir.to_string() => ENOTDIR,
+
+        x if x == zbox::Error::NotEmpty.to_string() => ENOTEMPTY
+        ,
+        x if x == zbox::Error::ReadOnly.to_string() => EACCES,
+        x if x == zbox::Error::CannotWrite.to_string() => EACCES,
+        x if x == zbox::Error::CannotRead.to_string() => EACCES,
+
+        _ => ENOMSG,
+    }
+}
+
 fn ie2errno(e: std::io::Error) -> c_int {
     use libc::{
         EACCES, EADDRINUSE, EADDRNOTAVAIL, ECONNABORTED, ECONNREFUSED, ECONNRESET, EEXIST, EINVAL,
@@ -45,6 +92,10 @@ fn ie2errno(e: std::io::Error) -> c_int {
         ErrorKind::WriteZero => {
             error!("Suddenly got WriteZero IO error kind");
             EIO
+        }
+        ErrorKind::Other => {
+            error!("IO error: {}", e);
+            oio2errno(e)
         }
         _ => {
             error!("Suddenly got unknown IO error: {}", e);
@@ -201,9 +252,14 @@ impl sharded_slab::Config for ShardedSlabCfg {
 
 type Slab<T> = sharded_slab::Slab<T, ShardedSlabCfg>;
 
+struct OpenedFile {
+    f : File,
+    last_write_offset: Option<u64>,
+}
+
 struct ZboxFs {
     r: Mutex<Repo>,
-    fhs: Slab<Mutex<File>>,
+    fhs: Slab<Mutex<OpenedFile>>,
 }
 
 impl FilesystemMT for ZboxFs {
@@ -236,6 +292,7 @@ impl FilesystemMT for ZboxFs {
         }
         let m = f.metadata().map_err(ze2errno)?;
 
+        let f = OpenedFile { f, last_write_offset: None };
         let fh = self.fhs.insert(Mutex::new(f)).ok_or(libc::ENOSR)?;
         let fh = fh as u64; // should be safe because of RESERVED_BITS
 
@@ -256,6 +313,7 @@ impl FilesystemMT for ZboxFs {
             f = oo.open(&mut r, p).map_err(ze2errno)?;
         }
 
+        let f = OpenedFile { f, last_write_offset: None };
         let fh = self.fhs.insert(Mutex::new(f)).ok_or(libc::ENOSR)?;
         let fh = fh as u64; // should be safe because of RESERVED_BITS
 
@@ -276,7 +334,7 @@ impl FilesystemMT for ZboxFs {
         };
         let mut f = f.into_inner().map_err(|_| libc::ENOLCK)?;
 
-        match f.finish() {
+        match f.f.finish() {
             Ok(()) => (),
             Err(e) if e == zbox::Error::NotWrite => (),
             Err(e) => return Err(ze2errno(e)),
@@ -293,11 +351,12 @@ impl FilesystemMT for ZboxFs {
         };
         let mut f = f.lock().map_err(|_| libc::ENOLCK)?;
 
-        match f.finish() {
+        match f.f.finish() {
             Ok(()) => (),
             Err(e) if e == zbox::Error::NotWrite => (),
             Err(e) => return Err(ze2errno(e)),
         }
+        f.last_write_offset = None;
 
         Ok(())
     }
@@ -320,11 +379,18 @@ impl FilesystemMT for ZboxFs {
         };
         use std::io::{Read, Seek};
 
-        let pos = match f.seek(std::io::SeekFrom::Start(offset)) {
+        if f.last_write_offset.is_some() {
+            if let Err(e) = f.f.finish() {
+                return result(Err(ze2errno(e)));
+            }
+            f.last_write_offset = None;
+        }
+
+        let pos = match f.f.seek(std::io::SeekFrom::Start(offset)) {
             Err(e) => return result(Err(ie2errno(e))),
             Ok(x) => x,
         };
-
+        
         if pos != offset {
             error!("Some seeking games are not implemented");
             return result(Err(libc::ENOSYS));
@@ -332,7 +398,7 @@ impl FilesystemMT for ZboxFs {
 
         let mut buf: Vec<u8> = vec![0; size as usize];
 
-        let rr = match (f.read(&mut buf)) {
+        let rr = match (f.f.read(&mut buf)) {
             Err(e) => return result(Err(ie2errno(e))),
             Ok(x) => x,
         };
@@ -358,14 +424,32 @@ impl FilesystemMT for ZboxFs {
 
         use std::io::{Seek, Write};
 
-        let pos = f.seek(std::io::SeekFrom::Start(offset)).map_err(ie2errno)?;
+        let mut skip_finish_seek = false;
 
-        if pos != offset {
-            error!("Some seeking games are not implemented");
-            Err(libc::ENOSYS)?;
+        if let Some(lwo) = f.last_write_offset {
+            if lwo == offset {
+                skip_finish_seek = true;
+            }
         }
 
-        let wr = f.write(&data[..]).map_err(ie2errno)?;
+        if !skip_finish_seek {
+            if f.last_write_offset.is_some() {
+                f.f.finish().map_err(ze2errno)?;
+                f.last_write_offset = None;
+            }
+
+            let pos = f.f.seek(std::io::SeekFrom::Start(offset)).map_err(ie2errno)?;
+
+            if pos != offset {
+                error!("Some seeking games are not implemented");
+                Err(libc::ENOSYS)?;
+            }
+        }
+
+
+        let wr = f.f.write(&data[..]).map_err(ie2errno)?;
+
+        f.last_write_offset = Some(offset + (wr as u64));
 
         Ok(wr as u32)
     }
@@ -399,7 +483,7 @@ impl FilesystemMT for ZboxFs {
             return Err(libc::E2BIG);
         }
 
-        f.set_len(size as usize).map_err(ze2errno)?;
+        f.f.set_len(size as usize).map_err(ze2errno)?;
 
         Ok(())
     }
