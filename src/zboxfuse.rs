@@ -425,6 +425,54 @@ impl FilesystemMT for ZboxFs {
             kind: zft2fft(zd.metadata().file_type()),
         }).collect() )
     }
+    fn mkdir(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        _mode: u32
+    ) -> ResultEntry {
+        let p = parent.join(name);
+
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        r.create_dir(&p).map_err(ze2errno)?;
+        let m = r.metadata(p).map_err(ze2errno)?;
+        Ok((TTL, zmeta2fa(m)))
+    }
+
+    fn unlink(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr
+    ) -> ResultEmpty {
+        let p = parent.join(name);
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        r.remove_file(p).map_err(ze2errno)?;
+        Ok(())
+    }
+
+    fn rmdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
+        let p = parent.join(name);
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        r.remove_dir(p).map_err(ze2errno)?;
+        Ok(())
+    }
+
+    fn rename(
+        &self,
+        _req: RequestInfo,
+        parent: &Path,
+        name: &OsStr,
+        newparent: &Path,
+        newname: &OsStr
+    ) -> ResultEmpty {
+        let p1 = parent.join(name);
+        let p2 = newparent.join(newname);
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        r.rename(p1,p2).map_err(ze2errno)?;
+        Ok(())
+    }
 
     fn utimens(
         &self,
