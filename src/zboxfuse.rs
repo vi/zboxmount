@@ -1,7 +1,7 @@
 #![allow(unused)]
 use fuse_mt::{
     CreatedEntry, FileAttr, FilesystemMT, RequestInfo, ResultCreate, ResultData, ResultEmpty,
-    ResultEntry, ResultOpen, ResultReaddir, ResultWrite, ResultXattr
+    ResultEntry, ResultOpen, ResultReaddir, ResultWrite, ResultXattr,
 };
 use libc::c_int;
 use log::{debug, error, warn};
@@ -123,7 +123,7 @@ fn systime2timespec(t: std::time::SystemTime) -> Timespec {
     }
 }
 
-fn zft2fft(ft : zbox::FileType) -> fuse_mt::FileType {
+fn zft2fft(ft: zbox::FileType) -> fuse_mt::FileType {
     match ft {
         zbox::FileType::File => fuse_mt::FileType::RegularFile,
         zbox::FileType::Dir => fuse_mt::FileType::Directory,
@@ -133,7 +133,7 @@ fn zft2fft(ft : zbox::FileType) -> fuse_mt::FileType {
 fn zmeta2fa(m: zbox::Metadata) -> fuse_mt::FileAttr {
     fuse_mt::FileAttr {
         size: m.content_len() as u64,
-        blocks: ((m.content_len()+8191) / 8192) as u64,
+        blocks: ((m.content_len() + 8191) / 8192) as u64,
         atime: Timespec { sec: 0, nsec: 0 },
         mtime: systime2timespec(m.modified_at()),
         ctime: Timespec { sec: 0, nsec: 0 },
@@ -356,7 +356,7 @@ impl FilesystemMT for ZboxFs {
         };
         let mut f = f.lock().map_err(|_| libc::ENOLCK)?;
 
-        use std::io::{Write, Seek};
+        use std::io::{Seek, Write};
 
         let pos = f.seek(std::io::SeekFrom::Start(offset)).map_err(ie2errno)?;
 
@@ -369,26 +369,23 @@ impl FilesystemMT for ZboxFs {
 
         Ok(wr as u32)
     }
-    fn truncate(
-        &self,
-        _req: RequestInfo,
-        path: &Path,
-        fh: Option<u64>,
-        size: u64
-    ) -> ResultEmpty {
+    fn truncate(&self, _req: RequestInfo, path: &Path, fh: Option<u64>, size: u64) -> ResultEmpty {
         let fh = match fh {
             Some(x) => x,
             None => {
                 let mut f;
                 {
                     let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
-                    f = OpenOptions::new().write(true).open(&mut r, path).map_err(ze2errno)?;
+                    f = OpenOptions::new()
+                        .write(true)
+                        .open(&mut r, path)
+                        .map_err(ze2errno)?;
                 }
-                if (size  > std::usize::MAX as u64) {
+                if (size > std::usize::MAX as u64) {
                     return Err(libc::E2BIG);
                 }
                 f.set_len(size as usize);
-                return Ok(())
+                return Ok(());
             }
         };
 
@@ -398,7 +395,7 @@ impl FilesystemMT for ZboxFs {
         };
         let mut f = f.lock().map_err(|_| libc::ENOLCK)?;
 
-        if (size  > std::usize::MAX as u64) {
+        if (size > std::usize::MAX as u64) {
             return Err(libc::E2BIG);
         }
 
@@ -411,7 +408,7 @@ impl FilesystemMT for ZboxFs {
         let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
         let m = r.metadata(path).map_err(ze2errno)?;
         if m.file_type() == zbox::FileType::Dir {
-            Ok((0,0))
+            Ok((0, 0))
         } else {
             Err(libc::ENOTDIR)
         }
@@ -420,18 +417,16 @@ impl FilesystemMT for ZboxFs {
     fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
         let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
         use std::os::unix::ffi::OsStringExt;
-        Ok(r.read_dir(path).map_err(ze2errno)?.iter().map(|zd| fuse_mt::DirectoryEntry {
-            name: zd.file_name().into(),
-            kind: zft2fft(zd.metadata().file_type()),
-        }).collect() )
+        Ok(r.read_dir(path)
+            .map_err(ze2errno)?
+            .iter()
+            .map(|zd| fuse_mt::DirectoryEntry {
+                name: zd.file_name().into(),
+                kind: zft2fft(zd.metadata().file_type()),
+            })
+            .collect())
     }
-    fn mkdir(
-        &self,
-        _req: RequestInfo,
-        parent: &Path,
-        name: &OsStr,
-        _mode: u32
-    ) -> ResultEntry {
+    fn mkdir(&self, _req: RequestInfo, parent: &Path, name: &OsStr, _mode: u32) -> ResultEntry {
         let p = parent.join(name);
 
         let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
@@ -440,12 +435,7 @@ impl FilesystemMT for ZboxFs {
         Ok((TTL, zmeta2fa(m)))
     }
 
-    fn unlink(
-        &self,
-        _req: RequestInfo,
-        parent: &Path,
-        name: &OsStr
-    ) -> ResultEmpty {
+    fn unlink(&self, _req: RequestInfo, parent: &Path, name: &OsStr) -> ResultEmpty {
         let p = parent.join(name);
         let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
         r.remove_file(p).map_err(ze2errno)?;
@@ -465,12 +455,12 @@ impl FilesystemMT for ZboxFs {
         parent: &Path,
         name: &OsStr,
         newparent: &Path,
-        newname: &OsStr
+        newname: &OsStr,
     ) -> ResultEmpty {
         let p1 = parent.join(name);
         let p2 = newparent.join(newname);
         let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
-        r.rename(p1,p2).map_err(ze2errno)?;
+        r.rename(p1, p2).map_err(ze2errno)?;
         Ok(())
     }
 
@@ -480,27 +470,15 @@ impl FilesystemMT for ZboxFs {
         _path: &Path,
         _fh: Option<u64>,
         _atime: Option<Timespec>,
-        _mtime: Option<Timespec>
+        _mtime: Option<Timespec>,
     ) -> ResultEmpty {
         Ok(())
     }
 
-    fn flush(
-        &self,
-        _req: RequestInfo,
-        _path: &Path,
-        _fh: u64,
-        _lock_owner: u64
-    ) -> ResultEmpty {
+    fn flush(&self, _req: RequestInfo, _path: &Path, _fh: u64, _lock_owner: u64) -> ResultEmpty {
         Ok(())
     }
-    fn getxattr(
-        &self,
-        _req: RequestInfo,
-        path: &Path,
-        name: &OsStr,
-        size: u32
-    ) -> ResultXattr {
+    fn getxattr(&self, _req: RequestInfo, path: &Path, name: &OsStr, size: u32) -> ResultXattr {
         use fuse_mt::Xattr;
         let r = self.r.lock().map_err(|_| libc::ENOLCK)?;
         use std::borrow::Borrow;
@@ -510,7 +488,7 @@ impl FilesystemMT for ZboxFs {
                     Ok(Xattr::Size(20))
                 } else {
                     let m = r.metadata(path).map_err(ze2errno)?;
-                    Ok(Xattr::Data(format!("{}",m.curr_version()).into_bytes()))
+                    Ok(Xattr::Data(format!("{}", m.curr_version()).into_bytes()))
                 }
             }
             "zbox.history" => {
@@ -518,12 +496,23 @@ impl FilesystemMT for ZboxFs {
                 if size == 0 {
                     Ok(Xattr::Size(80 * h.len() as u32))
                 } else {
-                    Ok(Xattr::Data(h.iter().map(|v| 
-                        format!("{},{},{}\n", v.num(), v.content_len(), humantime::format_rfc3339_seconds(v.created_at()))
-                    ).collect::<Vec<_>>().join("").into_bytes()))
+                    Ok(Xattr::Data(
+                        h.iter()
+                            .map(|v| {
+                                format!(
+                                    "{},{},{}\n",
+                                    v.num(),
+                                    v.content_len(),
+                                    humantime::format_rfc3339_seconds(v.created_at())
+                                )
+                            })
+                            .collect::<Vec<_>>()
+                            .join("")
+                            .into_bytes(),
+                    ))
                 }
             }
-            _ => Err(libc::ENODATA)
+            _ => Err(libc::ENODATA),
         }
     }
     fn listxattr(&self, _req: RequestInfo, _path: &Path, size: u32) -> ResultXattr {
@@ -531,10 +520,13 @@ impl FilesystemMT for ZboxFs {
         if size == 0 {
             Ok(Xattr::Size(1024))
         } else {
-            Ok(Xattr::Data(b"\
+            Ok(Xattr::Data(
+                b"\
 zbox.curr_version\0\
 zbox.history\0\
-".to_vec()))
+"
+                .to_vec(),
+            ))
         }
     }
 }
