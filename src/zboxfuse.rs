@@ -123,6 +123,13 @@ fn systime2timespec(t: std::time::SystemTime) -> Timespec {
     }
 }
 
+fn zft2fft(ft : zbox::FileType) -> fuse_mt::FileType {
+    match ft {
+        zbox::FileType::File => fuse_mt::FileType::RegularFile,
+        zbox::FileType::Dir => fuse_mt::FileType::Directory,
+    }
+}
+
 fn zmeta2fa(m: zbox::Metadata) -> fuse_mt::FileAttr {
     fuse_mt::FileAttr {
         size: m.content_len() as u64,
@@ -131,10 +138,7 @@ fn zmeta2fa(m: zbox::Metadata) -> fuse_mt::FileAttr {
         mtime: systime2timespec(m.modified_at()),
         ctime: Timespec { sec: 0, nsec: 0 },
         crtime: systime2timespec(m.created_at()),
-        kind: match m.file_type() {
-            zbox::FileType::File => fuse_mt::FileType::RegularFile,
-            zbox::FileType::Dir => fuse_mt::FileType::Directory,
-        },
+        kind: zft2fft(m.file_type()),
         perm: match m.file_type() {
             zbox::FileType::File => 0o666,
             zbox::FileType::Dir => 0o777,
@@ -401,6 +405,25 @@ impl FilesystemMT for ZboxFs {
         f.set_len(size as usize).map_err(ze2errno)?;
 
         Ok(())
+    }
+
+    fn opendir(&self, _req: RequestInfo, path: &Path, _flags: u32) -> ResultOpen {
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        let m = r.metadata(path).map_err(ze2errno)?;
+        if m.file_type() == zbox::FileType::Dir {
+            Ok((0,0))
+        } else {
+            Err(libc::ENOTDIR)
+        }
+    }
+
+    fn readdir(&self, _req: RequestInfo, path: &Path, _fh: u64) -> ResultReaddir {
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        use std::os::unix::ffi::OsStringExt;
+        Ok(r.read_dir(path).map_err(ze2errno)?.iter().map(|zd| fuse_mt::DirectoryEntry {
+            name: zd.file_name().into(),
+            kind: zft2fft(zd.metadata().file_type()),
+        }).collect() )
     }
 
     fn utimens(
