@@ -482,6 +482,7 @@ impl FilesystemMT for ZboxFs {
         use fuse_mt::Xattr;
         let r = self.r.lock().map_err(|_| libc::ENOLCK)?;
         use std::borrow::Borrow;
+        use hex_slice::AsHex;
         match name.to_string_lossy().borrow() {
             "zbox.curr_version" => {
                 if size == 0 {
@@ -512,6 +513,51 @@ impl FilesystemMT for ZboxFs {
                     ))
                 }
             }
+            | "zbox.volume_id"   
+            | "zbox.version" 
+            | "zbox.uri"           
+            | "zbox.ops_limit"     
+            | "zbox.mem_limit"     
+            | "zbox.cipher"
+            | "zbox.compress"      
+            | "zbox.version_limit" 
+            | "zbox.dedup_chunk"   
+            | "zbox.is_read_only"  
+            | "zbox.created_at"
+            => {
+                if size == 0 {
+                    return Ok(Xattr::Size(40));
+                }
+                let i = r.info().map_err(ze2errno)?;
+                match name.to_string_lossy().borrow() {
+                    "zbox.volume_id" => { Ok(Xattr::Data(format!("{:x}", i.volume_id().as_ref().plain_hex(false)).into_bytes()))  }
+                    "zbox.version" => { Ok(Xattr::Data(format!("{}", i.version()).into_bytes()))  }
+                    "zbox.uri" => { Ok(Xattr::Data(format!("{}", i.uri()).into_bytes()))  }
+                    "zbox.ops_limit" => { Ok(Xattr::Data(format!("{}", match i.ops_limit() { 
+                        zbox::OpsLimit::Interactive => "interactive",
+                        zbox::OpsLimit::Moderate => "moderate",
+                        zbox::OpsLimit::Sensitive => "sensitive",
+                    } ).into_bytes()))  }
+                    "zbox.mem_limit" => { Ok(Xattr::Data(format!("{}", match i.mem_limit() {
+                        zbox::MemLimit::Interactive => "interactive",
+                        zbox::MemLimit::Moderate => "moderate",
+                        zbox::MemLimit::Sensitive => "sensitive",
+                    }).into_bytes()))  }
+                    "zbox.cipher" => { Ok(Xattr::Data(format!("{}", match i.cipher() {
+                        zbox::Cipher::Aes => "aes",
+                        zbox::Cipher::Xchacha => "xchacha",
+                    }).into_bytes()))  }
+                    "zbox.compress" =>{ Ok(Xattr::Data(format!("{}", i.compress()).into_bytes()))  }
+                    "zbox.version_limit" =>{ Ok(Xattr::Data(format!("{}", i.version_limit()).into_bytes()))  }
+                    "zbox.dedup_chunk" => { Ok(Xattr::Data(format!("{}", i.dedup_chunk()).into_bytes()))  }
+                    "zbox.is_read_only" => { Ok(Xattr::Data(format!("{}", i.is_read_only()).into_bytes()))  }
+                    "zbox.created_at" => { Ok(Xattr::Data(format!("{}", humantime::format_rfc3339_seconds(i.created_at())).into_bytes()))  }
+                    _ => unreachable!()
+                }
+            }
+
+
+           
             _ => Err(libc::ENODATA),
         }
     }
@@ -519,6 +565,29 @@ impl FilesystemMT for ZboxFs {
         use fuse_mt::Xattr;
 
         let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+
+        if path == std::path::Path::new("/") {
+            return if size == 0 {
+                Ok(Xattr::Size(1024))
+            } else {
+                Ok(Xattr::Data(
+                    b"\
+zbox.volume_id\0\
+zbox.version\0\
+zbox.uri\0\
+zbox.ops_limit\0\
+zbox.mem_limit\0\
+zbox.cipher\0\
+zbox.compress\0\
+zbox.version_limit\0\
+zbox.dedup_chunk\0\
+zbox.is_read_only\0\
+zbox.created_at\0\
+".to_vec(),
+                ))
+            }
+        }
+
         let m = r.metadata(path).map_err(ze2errno)?;
 
         if m.file_type() == zbox::FileType::File {
