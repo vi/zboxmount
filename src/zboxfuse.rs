@@ -381,7 +381,7 @@ impl FilesystemMT for ZboxFs {
                     f = OpenOptions::new().write(true).open(&mut r, path).map_err(ze2errno)?;
                 }
                 if (size  > std::usize::MAX as u64) {
-                    return Err(libc::EMSGSIZE);
+                    return Err(libc::E2BIG);
                 }
                 f.set_len(size as usize);
                 return Ok(())
@@ -395,7 +395,7 @@ impl FilesystemMT for ZboxFs {
         let mut f = f.lock().map_err(|_| libc::ENOLCK)?;
 
         if (size  > std::usize::MAX as u64) {
-            return Err(libc::EMSGSIZE);
+            return Err(libc::E2BIG);
         }
 
         f.set_len(size as usize).map_err(ze2errno)?;
@@ -426,11 +426,45 @@ impl FilesystemMT for ZboxFs {
     fn getxattr(
         &self,
         _req: RequestInfo,
-        _path: &Path,
-        _name: &OsStr,
-        _size: u32
+        path: &Path,
+        name: &OsStr,
+        size: u32
     ) -> ResultXattr {
-        Err(libc::ENOENT)
+        use fuse_mt::Xattr;
+        let r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        use std::borrow::Borrow;
+        match name.to_string_lossy().borrow() {
+            "zbox.curr_version" => {
+                if size == 0 {
+                    Ok(Xattr::Size(20))
+                } else {
+                    let m = r.metadata(path).map_err(ze2errno)?;
+                    Ok(Xattr::Data(format!("{}",m.curr_version()).into_bytes()))
+                }
+            }
+            "zbox.history" => {
+                let h = r.history(path).map_err(ze2errno)?;
+                if size == 0 {
+                    Ok(Xattr::Size(80 * h.len() as u32))
+                } else {
+                    Ok(Xattr::Data(h.iter().map(|v| 
+                        format!("{},{},{}\n", v.num(), v.content_len(), humantime::format_rfc3339_seconds(v.created_at()))
+                    ).collect::<Vec<_>>().join("").into_bytes()))
+                }
+            }
+            _ => Err(libc::ENODATA)
+        }
+    }
+    fn listxattr(&self, _req: RequestInfo, _path: &Path, size: u32) -> ResultXattr {
+        use fuse_mt::Xattr;
+        if size == 0 {
+            Ok(Xattr::Size(1024))
+        } else {
+            Ok(Xattr::Data(b"\
+zbox.curr_version\0\
+zbox.history\0\
+".to_vec()))
+        }
     }
 }
 

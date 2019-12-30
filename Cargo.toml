@@ -19,6 +19,7 @@ time = "0.1.42"
 libc = "0.2.66"
 log = "0.4.8"
 sharded-slab = "0.0.7"
+humantime = "1.3.0"
 
 [features]
 default = ["storage-file", "storage-mem"]
