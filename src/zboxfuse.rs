@@ -515,18 +515,30 @@ impl FilesystemMT for ZboxFs {
             _ => Err(libc::ENODATA),
         }
     }
-    fn listxattr(&self, _req: RequestInfo, _path: &Path, size: u32) -> ResultXattr {
+    fn listxattr(&self, _req: RequestInfo, path: &Path, size: u32) -> ResultXattr {
         use fuse_mt::Xattr;
-        if size == 0 {
-            Ok(Xattr::Size(1024))
-        } else {
-            Ok(Xattr::Data(
-                b"\
+
+        let mut r = self.r.lock().map_err(|_| libc::ENOLCK)?;
+        let m = r.metadata(path).map_err(ze2errno)?;
+
+        if m.file_type() == zbox::FileType::File {
+            if size == 0 {
+                Ok(Xattr::Size(1024))
+            } else {
+                Ok(Xattr::Data(
+                    b"\
 zbox.curr_version\0\
 zbox.history\0\
 "
-                .to_vec(),
-            ))
+                    .to_vec(),
+                ))
+            }
+        } else {
+            if size == 0 {
+                Ok(Xattr::Size(0))
+            } else {
+                Ok(Xattr::Data(vec![]))
+            }
         }
     }
 }
